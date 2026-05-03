@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Wargame</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: sans-serif;
+      background: #0f0f0f;
+      color: #f0f0f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .screen { display: none; flex-direction: column; align-items: center; gap: 14px; width: 300px; }
+    .screen.active { display: flex; }
+    h1 { font-size: 28px; font-weight: 600; margin-bottom: 6px; }
+    p.sub { font-size: 14px; color: #888; margin-bottom: 10px; }
+    input {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #333;
+      background: #1a1a1a;
+      color: #f0f0f0;
+      font-size: 15px;
+      outline: none;
+    }
+    input:focus { border-color: #555; }
+    button {
+      width: 100%;
+      padding: 11px;
+      border-radius: 8px;
+      border: none;
+      font-size: 15px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.85; }
+    .btn-primary { background: #f0f0f0; color: #0f0f0f; font-weight: 600; }
+    .btn-secondary { background: #1e1e1e; color: #f0f0f0; border: 1px solid #333; }
+    .back { font-size: 13px; color: #666; cursor: pointer; margin-top: 4px; }
+    .back:hover { color: #aaa; }
+    .code-box {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 14px 20px;
+      text-align: center;
+      width: 100%;
+    }
+    .code-label { font-size: 12px; color: #666; margin-bottom: 6px; }
+    .code-val { font-size: 32px; font-weight: 700; letter-spacing: 10px; font-family: monospace; }
+    .player-list { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+    .player-slot {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #2a2a2a;
+      background: #1a1a1a;
+      min-height: 46px;
+    }
+    .player-slot.empty { border-style: dashed; background: transparent; }
+    .avatar {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 600; flex-shrink: 0;
+    }
+    .avatar.filled { background: #2a2060; color: #a89df5; }
+    .avatar.empty-av { background: #1e1e1e; color: #444; font-size: 18px; }
+    .player-name { font-size: 14px; }
+    .player-name.empty { color: #444; font-size: 13px; }
+    .host-badge {
+      margin-left: auto;
+      font-size: 11px;
+      background: #1e1e3a;
+      color: #a89df5;
+      border-radius: 4px;
+      padding: 2px 8px;
+    }
+    .error { font-size: 13px; color: #e05555; min-height: 18px; width: 100%; }
+    .status { font-size: 13px; color: #888; width: 100%; }
+  </style>
+</head>
+<body>
+
+  <!-- Main Menu -->
+  <div id="screen-menu" class="screen active">
+    <h1>Wargame</h1>
+    <p class="sub">Play with friends</p>
+    <input type="text" id="name-input" placeholder="Your name" maxlength="20" />
+    <button class="btn-primary" onclick="goCreate()">Create lobby</button>
+    <button class="btn-secondary" onclick="goJoin()">Join lobby</button>
+  </div>
+
+  <!-- Join Screen -->
+  <div id="screen-join" class="screen">
+    <h1>Join lobby</h1>
+    <p class="sub">Enter the 4-digit code</p>
+    <input type="text" id="code-input" placeholder="0000" maxlength="4"
+      style="letter-spacing:8px; font-family:monospace; font-size:22px; text-align:center;"
+      oninput="this.value=this.value.replace(/\D/g,'')" />
+    <div class="error" id="join-error"></div>
+    <button class="btn-primary" onclick="joinLobby()">Join</button>
+    <span class="back" onclick="goMenu()">← back</span>
+  </div>
+
+  <!-- Lobby Screen -->
+  <div id="screen-lobby" class="screen">
+    <h1>Lobby</h1>
+    <div class="code-box">
+      <div class="code-label">Invite code</div>
+      <div class="code-val" id="lobby-code">----</div>
+    </div>
+    <div class="status" id="lobby-status">Waiting for players…</div>
+    <div class="player-list" id="player-list"></div>
+    <button class="btn-primary" id="start-btn" style="display:none" onclick="startGame()">Start game</button>
+    <button class="btn-secondary" onclick="leaveLobby()">Leave</button>
+  </div>
+
+  <script>
+    const socket = io();
+    let myName = '';
+    let isHost = false;
+    let currentCode = '';
+
+    function show(id) {
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    }
+
+    function getInitials(name) {
+      return name.trim().split(' ').map(w => w[0].toUpperCase()).slice(0, 2).join('');
+    }
+
+    function goCreate() {
+      const name = document.getElementById('name-input').value.trim();
+      if (!name) { document.getElementById('name-input').focus(); return; }
+      myName = name;
+      isHost = true;
+      socket.emit('create_lobby', { name });
+    }
+
+    function goJoin() {
+      const name = document.getElementById('name-input').value.trim();
+      if (!name) { document.getElementById('name-input').focus(); return; }
+      myName = name;
+      isHost = false;
+      document.getElementById('join-error').textContent = '';
+      document.getElementById('code-input').value = '';
+      show('screen-join');
+    }
+
+    function joinLobby() {
+      const code = document.getElementById('code-input').value.trim();
+      if (code.length !== 4) {
+        document.getElementById('join-error').textContent = 'Enter a 4-digit code.';
+        return;
+      }
+      socket.emit('join_lobby', { code, name: myName });
+    }
+
+    function goMenu() {
+      show('screen-menu');
+    }
+
+    function leaveLobby() {
+      socket.disconnect();
+      socket.connect();
+      currentCode = '';
+      isHost = false;
+      show('screen-menu');
+    }
+
+    function startGame() {
+      alert('Game starting! Wire this up to your game logic.');
+    }
+
+    function renderPlayers(players) {
+      const list = document.getElementById('player-list');
+      const status = document.getElementById('lobby-status');
+      const startBtn = document.getElementById('start-btn');
+      list.innerHTML = '';
+
+      for (let i = 0; i < 4; i++) {
+        const slot = document.createElement('div');
+        if (players[i]) {
+          slot.className = 'player-slot';
+          const av = document.createElement('div');
+          av.className = 'avatar filled';
+          av.textContent = getInitials(players[i]);
+          const nm = document.createElement('span');
+          nm.className = 'player-name';
+          nm.textContent = players[i];
+          slot.appendChild(av);
+          slot.appendChild(nm);
+          if (i === 0) {
+            const badge = document.createElement('span');
+            badge.className = 'host-badge';
+            badge.textContent = 'host';
+            slot.appendChild(badge);
+          }
+        } else {
+          slot.className = 'player-slot empty';
+          const av = document.createElement('div');
+          av.className = 'avatar empty-av';
+          av.textContent = '+';
+          const nm = document.createElement('span');
+          nm.className = 'player-name empty';
+          nm.textContent = 'Waiting for player…';
+          slot.appendChild(av);
+          slot.appendChild(nm);
+        }
+        list.appendChild(slot);
+      }
+
+      status.textContent = `${players.length}/4 players joined`;
+      startBtn.style.display = (isHost && players.length >= 2) ? 'block' : 'none';
+    }
+
+    socket.on('lobby_update', ({ code, players }) => {
+      currentCode = code;
+      document.getElementById('lobby-code').textContent = code;
+      renderPlayers(players);
+      show('screen-lobby');
+    });
+
+    socket.on('error', ({ msg }) => {
+      document.getElementById('join-error').textContent = msg;
+    });
+  </script>
+</body>
+</html>
