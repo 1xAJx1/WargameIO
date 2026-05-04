@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Wargame</title>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -15,29 +17,23 @@
       align-items: center;
       justify-content: center;
       min-height: 100vh;
+      overflow: hidden;
     }
     .screen { display: none; flex-direction: column; align-items: center; gap: 14px; width: 300px; }
     .screen.active { display: flex; }
     h1 { font-size: 28px; font-weight: 600; margin-bottom: 6px; }
     p.sub { font-size: 14px; color: #888; margin-bottom: 10px; }
     input {
-      width: 100%;
-      padding: 10px 14px;
-      border-radius: 8px;
-      border: 1px solid #333;
-      background: #1a1a1a;
-      color: #f0f0f0;
-      font-size: 15px;
-      outline: none;
+      width: 100%; padding: 10px 14px;
+      border-radius: 8px; border: 1px solid #333;
+      background: #1a1a1a; color: #f0f0f0;
+      font-size: 15px; outline: none;
     }
     input:focus { border-color: #555; }
     button {
-      width: 100%;
-      padding: 11px;
-      border-radius: 8px;
-      border: none;
-      font-size: 15px;
-      cursor: pointer;
+      width: 100%; padding: 11px;
+      border-radius: 8px; border: none;
+      font-size: 15px; cursor: pointer;
       transition: opacity 0.15s;
     }
     button:hover { opacity: 0.85; }
@@ -46,30 +42,21 @@
     .back { font-size: 13px; color: #666; cursor: pointer; margin-top: 4px; }
     .back:hover { color: #aaa; }
     .code-box {
-      background: #1a1a1a;
-      border: 1px solid #2a2a2a;
-      border-radius: 10px;
-      padding: 14px 20px;
-      text-align: center;
-      width: 100%;
+      background: #1a1a1a; border: 1px solid #2a2a2a;
+      border-radius: 10px; padding: 14px 20px;
+      text-align: center; width: 100%;
     }
     .code-label { font-size: 12px; color: #666; margin-bottom: 6px; }
     .code-val { font-size: 32px; font-weight: 700; letter-spacing: 10px; font-family: monospace; }
     .player-list { width: 100%; display: flex; flex-direction: column; gap: 8px; }
     .player-slot {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 12px;
-      border-radius: 8px;
-      border: 1px solid #2a2a2a;
-      background: #1a1a1a;
-      min-height: 46px;
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; border-radius: 8px;
+      border: 1px solid #2a2a2a; background: #1a1a1a; min-height: 46px;
     }
     .player-slot.empty { border-style: dashed; background: transparent; }
     .avatar {
-      width: 30px; height: 30px;
-      border-radius: 50%;
+      width: 30px; height: 30px; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 12px; font-weight: 600; flex-shrink: 0;
     }
@@ -78,25 +65,212 @@
     .player-name { font-size: 14px; }
     .player-name.empty { color: #444; font-size: 13px; }
     .host-badge {
-      margin-left: auto;
-      font-size: 11px;
-      background: #1e1e3a;
-      color: #a89df5;
-      border-radius: 4px;
-      padding: 2px 8px;
+      margin-left: auto; font-size: 11px;
+      background: #1e1e3a; color: #a89df5;
+      border-radius: 4px; padding: 2px 8px;
     }
     .error { font-size: 13px; color: #e05555; min-height: 18px; width: 100%; }
     .status { font-size: 13px; color: #888; width: 100%; }
+
+    /* Settings button — top right, always visible on menu/lobby/mapselect screens */
+    #settings-btn {
+      position: fixed; top: 16px; right: 16px;
+      z-index: 9999;
+      width: 38px; height: 38px;
+      border-radius: 50%; border: 1px solid #333;
+      background: #1a1a1a; color: #ccc;
+      font-size: 18px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s, color 0.15s;
+    }
+    #settings-btn:hover { background: #2a2a2a; color: #fff; }
+
+    /* Settings panel overlay */
+    #settings-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      z-index: 10000;
+      background: rgba(0,0,0,0.6);
+      align-items: center; justify-content: center;
+    }
+    #settings-overlay.open { display: flex; }
+    #settings-panel {
+      background: #161616; border: 1px solid #2e2e2e;
+      border-radius: 14px; padding: 28px 28px 22px;
+      width: 320px; display: flex; flex-direction: column; gap: 20px;
+    }
+    #settings-panel h2 {
+      font-size: 17px; font-weight: 600; color: #f0f0f0;
+      margin-bottom: 4px;
+    }
+    .setting-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px;
+    }
+    .setting-label { font-size: 14px; color: #ccc; }
+    .setting-desc { font-size: 12px; color: #666; margin-top: 2px; }
+
+    /* Toggle switch */
+    .toggle {
+      position: relative; width: 44px; height: 24px; flex-shrink: 0;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute; inset: 0;
+      background: #333; border-radius: 12px;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .toggle input:checked + .toggle-track { background: #a89df5; }
+    .toggle-thumb {
+      position: absolute; top: 3px; left: 3px;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #fff; transition: transform 0.2s;
+      pointer-events: none;
+    }
+    .toggle input:checked ~ .toggle-thumb { transform: translateX(20px); }
+
+    /* Map style selector */
+    .map-style-options { display: flex; gap: 8px; }
+    .map-style-option {
+      flex: 1; padding: 8px 6px; border-radius: 8px;
+      border: 1px solid #2e2e2e; background: #1a1a1a;
+      color: #aaa; font-size: 13px; text-align: center;
+      cursor: pointer; transition: border-color 0.15s, color 0.15s;
+    }
+    .map-style-option.active { border-color: #a89df5; color: #a89df5; }
+    .map-style-icon { font-size: 20px; display: block; margin-bottom: 4px; }
+
+    .settings-divider {
+      border: none; border-top: 1px solid #2a2a2a; margin: 0;
+    }
+    .settings-close-btn {
+      width: 100%; padding: 10px;
+      border-radius: 8px; border: 1px solid #333;
+      background: #1e1e1e; color: #f0f0f0;
+      font-size: 14px; cursor: pointer;
+    }
+    .settings-close-btn:hover { background: #2a2a2a; }
+
+    /* Map Selection */
+    #screen-mapselect {
+      display: none; position: fixed; inset: 0;
+      background: #0d1117;
+      flex-direction: column; align-items: center;
+      justify-content: center; gap: 24px; padding: 2rem;
+    }
+    #screen-mapselect.active { display: flex; }
+    .mapselect-title { font-size: 13px; color: #666; text-transform: uppercase; letter-spacing: 2px; }
+    .mapselect-heading { font-size: 26px; font-weight: 600; }
+    .map-cards { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; max-width: 700px; }
+    .map-card {
+      width: 200px; cursor: pointer;
+      border-radius: 12px; overflow: hidden;
+      border: 2px solid #2a2a2a; background: #1a1a1a;
+      transition: border-color 0.15s, transform 0.15s;
+    }
+    .map-card:hover { border-color: #555; transform: scale(1.03); }
+    .map-card.selected { border-color: #e8a020; }
+    .map-preview { width: 100%; height: 110px; overflow: hidden; position: relative; }
+    .map-preview img { width: 100%; height: 100%; object-fit: cover; filter: saturate(0.8) brightness(0.9); }
+    .map-card-name { padding: 10px; text-align: center; font-size: 14px; font-weight: 500; }
+    .map-card-desc { padding: 0 10px 10px; text-align: center; font-size: 12px; color: #666; }
+    .mapselect-btn-row { display: flex; gap: 12px; }
+    .mapselect-btn-row button { width: 140px; }
+    #waiting-msg { font-size: 15px; color: #888; text-align: center; }
+
+    /* Game */
+    #screen-game {
+      display: none; position: fixed; inset: 0;
+    }
+    #screen-game.active { display: block; }
+    #map { width: 100%; height: 100%; }
+
+    #hud {
+      position: fixed; top: 16px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000; display: flex;
+      flex-direction: column; align-items: center; gap: 8px;
+      pointer-events: none;
+    }
+    #spawn-banner {
+      background: rgba(0,0,0,0.8);
+      border: 1px solid #444; border-radius: 10px;
+      padding: 12px 28px; text-align: center;
+    }
+    #spawn-banner h2 { font-size: 15px; font-weight: 400; color: #ccc; margin-bottom: 4px; }
+    #spawn-timer { font-size: 36px; font-weight: 700; color: #f0f0f0; font-family: monospace; }
+    #spawn-timer.urgent { color: #e05555; }
+    #spawned-msg {
+      background: rgba(0,0,0,0.8); border: 1px solid #444;
+      border-radius: 10px; padding: 10px 24px;
+      font-size: 15px; color: #7ddf7d; display: none;
+      pointer-events: none;
+    }
+    #map-name-badge {
+      background: rgba(0,0,0,0.6); border: 1px solid #333;
+      border-radius: 8px; padding: 4px 14px;
+      font-size: 12px; color: #888; pointer-events: none;
+    }
+
+
   </style>
 </head>
 <body>
+
+  <!-- Settings button (shown on all non-game screens; also injected into game screen) -->
+  <button id="settings-btn" onclick="openSettings()" title="Settings">⚙</button>
+
+  <!-- Settings overlay -->
+  <div id="settings-overlay" onclick="overlayClick(event)">
+    <div id="settings-panel">
+      <h2>Settings</h2>
+
+      <hr class="settings-divider"/>
+
+      <!-- Hide all map text -->
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Hide all map text</div>
+          <div class="setting-desc">Remove all country, city &amp; region labels</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-labels" onchange="applySettings()"/>
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+
+      <hr class="settings-divider"/>
+
+      <!-- Map style -->
+      <div>
+        <div class="setting-label" style="margin-bottom:10px">Map style</div>
+        <div class="map-style-options">
+          <div class="map-style-option active" id="style-satellite" onclick="setMapStyle('satellite')">
+            <span class="map-style-icon">🛰️</span>Satellite
+          </div>
+          <div class="map-style-option" id="style-terrain" onclick="setMapStyle('terrain')">
+            <span class="map-style-icon">🗺️</span>Terrain
+          </div>
+          <div class="map-style-option" id="style-simple" onclick="setMapStyle('simple')">
+            <span class="map-style-icon">🟦</span>Simple
+          </div>
+        </div>
+      </div>
+
+      <hr class="settings-divider"/>
+
+      <button class="settings-close-btn" onclick="closeSettings()">Done</button>
+    </div>
+  </div>
 
   <!-- Main Menu -->
   <div id="screen-menu" class="screen active">
     <h1>Wargame</h1>
     <p class="sub">Play with friends</p>
-    <input type="text" id="name-input" placeholder="Your name" maxlength="20" />
-    <button class="btn-primary" onclick="goCreate()">Create lobby</button>
+    <input type="text" id="name-input" placeholder="Your name" maxlength="20"/>
+    <button class="btn-primary" onclick="goSingleplayer()">Singleplayer</button>
+    <button class="btn-secondary" onclick="goCreate()">Create lobby</button>
     <button class="btn-secondary" onclick="goJoin()">Join lobby</button>
   </div>
 
@@ -105,8 +279,8 @@
     <h1>Join lobby</h1>
     <p class="sub">Enter the 4-digit code</p>
     <input type="text" id="code-input" placeholder="0000" maxlength="4"
-      style="letter-spacing:8px; font-family:monospace; font-size:22px; text-align:center;"
-      oninput="this.value=this.value.replace(/\D/g,'')" />
+      style="letter-spacing:8px;font-family:monospace;font-size:22px;text-align:center;"
+      oninput="this.value=this.value.replace(/\D/g,'')"/>
     <div class="error" id="join-error"></div>
     <button class="btn-primary" onclick="joinLobby()">Join</button>
     <span class="back" onclick="goMenu()">← back</span>
@@ -121,8 +295,33 @@
     </div>
     <div class="status" id="lobby-status">Waiting for players…</div>
     <div class="player-list" id="player-list"></div>
-    <button class="btn-primary" id="start-btn" style="display:none" onclick="startGame()">Start game</button>
+    <button class="btn-primary" id="start-btn" style="display:none" onclick="goMapSelect()">Start game</button>
     <button class="btn-secondary" onclick="leaveLobby()">Leave</button>
+  </div>
+
+  <!-- Map Selection -->
+  <div id="screen-mapselect">
+    <p class="mapselect-title">Select map</p>
+    <p class="mapselect-heading">Choose a battlefield</p>
+    <div class="map-cards" id="map-cards"></div>
+    <div id="waiting-msg" style="display:none">Waiting for host to pick a map…</div>
+    <div class="mapselect-btn-row" id="mapselect-btns">
+      <button class="btn-secondary" onclick="goBackToLobby()">Back</button>
+      <button class="btn-primary" onclick="confirmMap()">Confirm</button>
+    </div>
+  </div>
+
+  <!-- Game Screen -->
+  <div id="screen-game">
+    <div id="map"></div>
+    <div id="hud">
+      <div id="spawn-banner">
+        <h2>Click anywhere on land to spawn</h2>
+        <div id="spawn-timer">10</div>
+      </div>
+      <div id="spawned-msg">Spawned! Get ready…</div>
+      <div id="map-name-badge"></div>
+    </div>
   </div>
 
   <script>
@@ -130,14 +329,144 @@
     let myName = '';
     let isHost = false;
     let currentCode = '';
+    let selectedMap = 'europe';
+    let leafletMap = null;
+    let spawnRect   = null;   // L.rectangle for the player's territory
+    let spawnLabel  = null;   // L.marker with divIcon showing player name
+    let myColor     = '#ffffff';
+    let spawnTimerInterval = null;
+    let spawnTimeLeft = 10;
+    let hasSpawned = false;
+
+    // Assign a vivid random colour once per game session
+    const PLAYER_COLORS = [
+      '#e74c3c','#e67e22','#f1c40f','#2ecc71','#1abc9c',
+      '#3498db','#9b59b6','#e91e63','#00bcd4','#ff5722',
+      '#8bc34a','#ff9800','#673ab7','#03a9f4','#4caf50'
+    ];
+    function pickColor() {
+      return PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)];
+    }
+
+    // ─── Settings state ───────────────────────────────────────────────────────
+    const settings = {
+      hideLabels: false,
+      mapStyle: 'satellite'   // 'satellite' | 'terrain' | 'simple'
+    };
+
+    // Tile layer handles
+    let layerBase     = null;
+    let layerLabels   = null;
+
+    // Tile URL configs
+    const TILE_CONFIGS = {
+      satellite: {
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        opts: { attribution: 'Tiles &copy; Esri', maxZoom: 19, noWrap: true }
+      },
+      terrain: {
+        url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+        opts: { attribution: '&copy; OpenTopoMap contributors', maxZoom: 17, subdomains: 'abc', noWrap: true }
+      },
+      simple: {
+        url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png',
+        opts: { attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 19, noWrap: true }
+      }
+    };
+
+    const LABEL_URL  = 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png';
+    const LABEL_OPTS = { attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 19, opacity: 0.85, noWrap: true };
+
+    // ─── Settings panel ───────────────────────────────────────────────────────
+    function openSettings() {
+      document.getElementById('toggle-labels').checked = settings.hideLabels;
+      ['satellite','terrain','simple'].forEach(s =>
+        document.getElementById('style-' + s).classList.toggle('active', settings.mapStyle === s)
+      );
+      document.getElementById('settings-overlay').classList.add('open');
+    }
+
+    function closeSettings() {
+      document.getElementById('settings-overlay').classList.remove('open');
+    }
+
+    function overlayClick(e) {
+      if (e.target === document.getElementById('settings-overlay')) closeSettings();
+    }
+
+    function applySettings() {
+      settings.hideLabels = document.getElementById('toggle-labels').checked;
+      if (leafletMap) updateMapLayers();
+    }
+
+    function setMapStyle(style) {
+      settings.mapStyle = style;
+      ['satellite','terrain','simple'].forEach(s =>
+        document.getElementById('style-' + s).classList.toggle('active', settings.mapStyle === s)
+      );
+      if (leafletMap) updateMapLayers();
+    }
+
+    function updateMapLayers() {
+      if (!leafletMap) return;
+
+      // ── Base layer ──
+      if (layerBase) { leafletMap.removeLayer(layerBase); layerBase = null; }
+      const cfg = TILE_CONFIGS[settings.mapStyle];
+      layerBase = L.tileLayer(cfg.url, cfg.opts);
+      layerBase.addTo(leafletMap);
+      layerBase.bringToBack();
+
+      // ── Label layer ──
+      if (layerLabels) { leafletMap.removeLayer(layerLabels); layerLabels = null; }
+      if (!settings.hideLabels) {
+        layerLabels = L.tileLayer(LABEL_URL, LABEL_OPTS);
+        layerLabels.addTo(leafletMap);
+      }
+    }
+
+    // ─── Screens ──────────────────────────────────────────────────────────────
+    const MAPS = {
+      europe: {
+        name: 'Europe',
+        desc: 'Dense continent, close quarters',
+        center: [54, 15],
+        zoom: 4,
+        minZoom: 3,
+        maxZoom: 10,
+        preview: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/Europe_topography_map.png/320px-Europe_topography_map.png'
+      },
+      world: {
+        name: 'Entire World',
+        desc: 'Massive open battlefield',
+        center: [20, 0],
+        zoom: 2,
+        minZoom: 2,
+        maxZoom: 8,
+        preview: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/80/World_map_-_low_resolution.svg/320px-World_map_-_low_resolution.svg.png'
+      }
+    };
 
     function show(id) {
-      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.screen, #screen-mapselect, #screen-game').forEach(s => s.classList.remove('active'));
       document.getElementById(id).classList.add('active');
+
+      // Keep settings button visible on all screens
+      const btn = document.getElementById('settings-btn');
+      btn.style.display = 'flex';
     }
 
     function getInitials(name) {
       return name.trim().split(' ').map(w => w[0].toUpperCase()).slice(0, 2).join('');
+    }
+
+    function goSingleplayer() {
+      const name = document.getElementById('name-input').value.trim();
+      if (!name) { document.getElementById('name-input').focus(); return; }
+      myName = name;
+      isHost = true;
+      buildMapCards(true, true);
+      show('screen-mapselect');
     }
 
     function goCreate() {
@@ -167,9 +496,7 @@
       socket.emit('join_lobby', { code, name: myName });
     }
 
-    function goMenu() {
-      show('screen-menu');
-    }
+    function goMenu() { show('screen-menu'); }
 
     function leaveLobby() {
       socket.disconnect();
@@ -179,8 +506,57 @@
       show('screen-menu');
     }
 
-    function startGame() {
-      alert('Game starting! Wire this up to your game logic.');
+    function goBackToLobby() { show('screen-lobby'); }
+
+    function buildMapCards(hostOnly, solo) {
+      const container = document.getElementById('map-cards');
+      const btns = document.getElementById('mapselect-btns');
+      const waiting = document.getElementById('waiting-msg');
+      container.innerHTML = '';
+
+      if (hostOnly) {
+        btns.style.display = 'flex';
+        btns.innerHTML = solo
+          ? '<button class="btn-primary" onclick="confirmMap()" style="width:140px">Play</button>'
+          : '<button class="btn-secondary" onclick="goBackToLobby()" style="width:140px">Back</button><button class="btn-primary" onclick="confirmMap()" style="width:140px">Confirm</button>';
+        waiting.style.display = 'none';
+      } else {
+        btns.style.display = 'none';
+        waiting.style.display = 'block';
+      }
+
+      Object.entries(MAPS).forEach(([key, map]) => {
+        const card = document.createElement('div');
+        card.className = 'map-card' + (key === selectedMap ? ' selected' : '');
+        card.innerHTML = `
+          <div class="map-preview">
+            <img src="${map.preview}" alt="${map.name}"/>
+          </div>
+          <div class="map-card-name">${map.name}</div>
+          <div class="map-card-desc">${map.desc}</div>
+        `;
+        if (hostOnly) {
+          card.onclick = () => {
+            document.querySelectorAll('.map-card').forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
+            selectedMap = key;
+          };
+        }
+        container.appendChild(card);
+      });
+    }
+
+    function goMapSelect() {
+      buildMapCards(true, false);
+      show('screen-mapselect');
+    }
+
+    function confirmMap() {
+      if (currentCode) {
+        socket.emit('start_game', { code: currentCode, map: selectedMap });
+      } else {
+        launchGame(selectedMap);
+      }
     }
 
     function renderPlayers(players) {
@@ -188,7 +564,6 @@
       const status = document.getElementById('lobby-status');
       const startBtn = document.getElementById('start-btn');
       list.innerHTML = '';
-
       for (let i = 0; i < 4; i++) {
         const slot = document.createElement('div');
         if (players[i]) {
@@ -220,16 +595,137 @@
         }
         list.appendChild(slot);
       }
-
       status.textContent = `${players.length}/4 players joined`;
       startBtn.style.display = (isHost && players.length >= 2) ? 'block' : 'none';
     }
 
+    function launchGame(mapKey) {
+      hasSpawned = false;
+      spawnTimeLeft = 10;
+      const timerEl = document.getElementById('spawn-timer');
+      timerEl.textContent = '10';
+      timerEl.classList.remove('urgent');
+      document.getElementById('spawn-banner').style.display = 'block';
+      document.getElementById('spawned-msg').style.display = 'none';
+      document.getElementById('map-name-badge').textContent = MAPS[mapKey].name;
+
+      show('screen-game');
+
+      if (leafletMap) {
+        leafletMap.remove();
+        leafletMap = null;
+        layerBase   = null;
+        layerLabels = null;
+        spawnRect   = null;
+        spawnLabel  = null;
+      }
+
+      const cfg = MAPS[mapKey];
+      leafletMap = L.map('map', {
+        center: cfg.center,
+        zoom: cfg.zoom,
+        minZoom: cfg.minZoom,
+        maxZoom: cfg.maxZoom,
+        zoomControl: true,
+        worldCopyJump: false,
+        maxBounds: [[-90, -180], [90, 180]],
+        maxBoundsViscosity: 1.0,
+      });
+
+      // Assign a fresh random colour for this game
+      myColor = pickColor();
+
+      // Apply current settings to build initial layers
+      updateMapLayers();
+
+      leafletMap.on('click', (e) => {
+        if (hasSpawned) return;
+        doSpawn(e.latlng);
+      });
+
+      startSpawnTimer(mapKey);
+    }
+
+    function startSpawnTimer(mapKey) {
+      clearInterval(spawnTimerInterval);
+      spawnTimerInterval = setInterval(() => {
+        spawnTimeLeft--;
+        const el = document.getElementById('spawn-timer');
+        el.textContent = spawnTimeLeft;
+        if (spawnTimeLeft <= 3) el.classList.add('urgent');
+        if (spawnTimeLeft <= 0) {
+          clearInterval(spawnTimerInterval);
+          if (!hasSpawned) autoSpawn(mapKey);
+        }
+      }, 1000);
+    }
+
+    function autoSpawn(mapKey) {
+      const cfg = MAPS[mapKey];
+      const lat = cfg.center[0] + (Math.random() - 0.5) * 20;
+      const lng = cfg.center[1] + (Math.random() - 0.5) * 30;
+      doSpawn(L.latLng(lat, lng));
+    }
+
+    function doSpawn(latlng) {
+      hasSpawned = true;
+      clearInterval(spawnTimerInterval);
+      document.getElementById('spawn-banner').style.display = 'none';
+      document.getElementById('spawned-msg').style.display = 'block';
+
+      // Remove old territory if re-spawning
+      if (spawnRect)  { spawnRect.remove();  spawnRect  = null; }
+      if (spawnLabel) { spawnLabel.remove(); spawnLabel = null; }
+
+      // Territory square: ~0.8 degrees on each side at spawn zoom
+      const size = 0.8;
+      const bounds = [
+        [latlng.lat - size / 2, latlng.lng - size / 2],
+        [latlng.lat + size / 2, latlng.lng + size / 2]
+      ];
+
+      spawnRect = L.rectangle(bounds, {
+        color:       myColor,   // opaque border
+        weight:      3,
+        opacity:     1,
+        fillColor:   myColor,
+        fillOpacity: 0.25,
+        interactive: false
+      }).addTo(leafletMap);
+
+      // Name label centred inside the rectangle
+      const labelIcon = L.divIcon({
+        className: '',
+        html: `<div style="
+          color: ${myColor};
+          font-size: 13px;
+          font-weight: 700;
+          font-family: sans-serif;
+          text-shadow: 0 0 4px #000, 0 0 8px #000;
+          white-space: nowrap;
+          pointer-events: none;
+          transform: translate(-50%, -50%);
+        ">${myName}</div>`,
+        iconSize:   [0, 0],
+        iconAnchor: [0, 0]
+      });
+
+      spawnLabel = L.marker(latlng, { icon: labelIcon, interactive: false })
+        .addTo(leafletMap);
+
+      leafletMap.setView(latlng, Math.max(leafletMap.getZoom(), 6), { animate: true });
+    }
+
+    // ─── Socket events ────────────────────────────────────────────────────────
     socket.on('lobby_update', ({ code, players }) => {
       currentCode = code;
       document.getElementById('lobby-code').textContent = code;
       renderPlayers(players);
       show('screen-lobby');
+    });
+
+    socket.on('game_started', ({ map }) => {
+      launchGame(map);
     });
 
     socket.on('error', ({ msg }) => {
